@@ -1,0 +1,175 @@
+<!-- frontend/index.html -->
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Blogging Platform with Comment Moderation</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <style>
+    body { font-family: Arial, sans-serif; max-width: 900px; margin: 20px auto; padding: 0 10px; }
+    section { display: none; }
+    .active { display: block; }
+    input, textarea { width: 100%; padding: 8px; margin: 6px 0; box-sizing: border-box; }
+    button { padding: 8px 12px; margin-top: 6px; }
+    .card { border: 1px solid #ddd; padding: 10px; margin-bottom: 10px; border-radius: 6px; }
+    nav { margin-bottom: 14px; }
+    nav button { margin-right: 8px; }
+  </style>
+</head>
+<body>
+  <h1>Blogging Platform with Comment Moderation</h1>
+
+  <nav>
+    <button onclick="openHome()">Home</button>
+    <button onclick="openAdmin()">Admin</button>
+  </nav>
+
+  <!-- HOME / CREATE POST -->
+  <section id="home" class="active">
+    <h2>Create Blog Post</h2>
+    <input id="title" placeholder="Blog title" />
+    <textarea id="content" placeholder="Write blog content here..." rows="6"></textarea>
+    <button onclick="createPost()">Publish</button>
+
+    <h2>All Blog Posts</h2>
+    <div id="posts"></div>
+  </section>
+
+  <!-- VIEW POST -->
+  <section id="viewPost">
+    <div id="post"></div>
+
+    <h3>Add Comment</h3>
+    <input id="username" placeholder="Your name" />
+    <textarea id="message" placeholder="Your comment..." rows="4"></textarea>
+    <button onclick="addComment()">Submit</button>
+
+    <h3>Approved Comments</h3>
+    <div id="comments"></div>
+
+    <button onclick="openHome()">Back</button>
+  </section>
+
+  <!-- ADMIN -->
+  <section id="admin">
+    <h2>Pending Comments</h2>
+    <div id="pending"></div>
+    <button onclick="openHome()">Back</button>
+  </section>
+
+  <script>
+    const API = "http://localhost:5000"; // change to your deployed backend URL when published
+    let currentPost = "";
+
+    // navigation
+    function show(id) {
+      document.querySelectorAll("section").forEach(s => s.classList.remove("active"));
+      document.getElementById(id).classList.add("active");
+    }
+    function openHome(){ show("home"); loadPosts(); }
+    function openAdmin(){ show("admin"); getPending(); }
+    function openPost(){ show("viewPost"); loadComments(); }
+
+    // create post
+    async function createPost(){
+      const titleVal = document.getElementById("title").value.trim();
+      const contentVal = document.getElementById("content").value.trim();
+      if(!titleVal || !contentVal){ alert("Title and content required"); return; }
+      await fetch(`${API}/post/create`, {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({ title: titleVal, content: contentVal })
+      });
+      document.getElementById("title").value = "";
+      document.getElementById("content").value = "";
+      loadPosts();
+    }
+
+    // load posts
+    async function loadPosts(){
+      document.getElementById("posts").innerHTML = "Loading...";
+      const res = await fetch(`${API}/posts`);
+      const posts = await res.json();
+      if(!Array.isArray(posts)){ document.getElementById("posts").innerText = "Error loading posts"; return; }
+      const html = posts.map(p => `
+        <div class="card">
+          <h3>${escapeHtml(p.title)}</h3>
+          <p>${escapeHtml(p.content)}</p>
+          <button onclick="view('${p._id}')">View Post</button>
+        </div>
+      `).join("");
+      document.getElementById("posts").innerHTML = html || "<p>No posts yet.</p>";
+    }
+
+    // view post
+    function view(id){
+      currentPost = id;
+      loadPost(id);
+      openPost();
+    }
+
+    async function loadPost(id){
+      const res = await fetch(`${API}/posts`);
+      const posts = await res.json();
+      const post = posts.find(p => p._id === id);
+      if(!post){ document.getElementById("post").innerHTML = "<p>Post not found</p>"; return; }
+      document.getElementById("post").innerHTML = `<h2>${escapeHtml(post.title)}</h2><p>${escapeHtml(post.content)}</p>`;
+    }
+
+    // add comment
+    async function addComment(){
+      const usernameVal = document.getElementById("username").value.trim();
+      const messageVal = document.getElementById("message").value.trim();
+      if(!usernameVal || !messageVal){ alert("Name and comment required"); return; }
+      await fetch(`${API}/comment/create`, {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({ postId: currentPost, username: usernameVal, message: messageVal })
+      });
+      document.getElementById("message").value = "";
+      alert("Comment submitted for review");
+    }
+
+    // load approved comments
+    async function loadComments(){
+      document.getElementById("comments").innerHTML = "Loading...";
+      const res = await fetch(`${API}/comments/${currentPost}`);
+      const comments = await res.json();
+      if(!Array.isArray(comments)){ document.getElementById("comments").innerText = "Error loading comments"; return; }
+      const html = comments.map(c => `<div class="card"><strong>${escapeHtml(c.username)}</strong><p>${escapeHtml(c.message)}</p></div>`).join("");
+      document.getElementById("comments").innerHTML = html || "<p>No approved comments yet.</p>";
+    }
+
+    // admin: pending
+    async function getPending(){
+      document.getElementById("pending").innerHTML = "Loading...";
+      const res = await fetch(`${API}/comments/pending`);
+      const comments = await res.json();
+      if(!Array.isArray(comments)){ document.getElementById("pending").innerText = "Error"; return; }
+      const html = comments.map(c => `
+        <div class="card">
+          <strong>${escapeHtml(c.username)}</strong>
+          <p>${escapeHtml(c.message)}</p>
+          <button onclick="approve('${c._id}')">Approve</button>
+        </div>
+      `).join("");
+      document.getElementById("pending").innerHTML = html || "<p>No pending comments.</p>";
+    }
+
+    // approve
+    async function approve(id){
+      await fetch(`${API}/comment/approve/${id}`, { method: "PUT" });
+      getPending();
+    }
+
+    // small helper: escape
+    function escapeHtml(s){
+      if(!s) return "";
+      return s.replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;");
+    }
+
+    // start
+    loadPosts();
+  </script>
+</body>
+</html>
